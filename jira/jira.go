@@ -117,12 +117,28 @@ func (api *RestAPI) GetRelease(epicID string) ([]ReleaseItem, error) {
 	return results, nil
 }
 
+func (api *RestAPI) CreateEpicNew(project string, summary string, projectItems []ProjectItem) (*Issue, error) {
+	desc := convertToDescription(projectItems)
+	i := issue{summary: summary, description: desc, project: project1{key: project}, issuetype: issuetype{name: "epic"}}
+	b, _ := json.Marshal(i)
+	issue, err := api.createIssue(bytes.NewReader(b))
+	return issue, err
+}
+
 //CreateEpic will create a new release epic in Jira
 func (api *RestAPI) CreateEpic(project string, summary string, releaseItems []ReleaseItem) (*Issue, error) {
 	i := issue{summary: summary, project: project1{key: project}, issuetype: issuetype{name: "epic"}}
 	b, _ := json.Marshal(i)
 	issue, err := api.createIssue(bytes.NewReader(b))
 	return issue, err
+}
+
+func convertToDescription(pi []ProjectItem) string {
+	desc := "..."
+	for _, r := range pi {
+		desc += fmt.Sprintf("%s|%s\r\n", r.Project, r.Branch)
+	}
+	return desc
 }
 
 func (api *RestAPI) DeleteIssue(issue *Issue) error {
@@ -166,6 +182,12 @@ func (api *RestAPI) getIssue(issueKey string) (*Issue, error) {
 type ReleaseItem struct {
 	Project string
 	Version string
+}
+
+// ProjectItem represents a project and git branch
+type ProjectItem struct {
+	Project string
+	Branch  string
 }
 
 func (api *RestAPI) execRequest(requestType, requestUrl string, data io.Reader) (int, []byte) {

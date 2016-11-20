@@ -23,7 +23,7 @@ import (
 // assembleCmd represents the assemble command
 var assembleCmd = &cobra.Command{
 	Use:   "assemble",
-	Short: "A brief description of your command",
+	Short: "Perform full automation description of your command",
 	Long: `A longer description that spans multiple lines and likely contains examples
 and usage of using your command. For example:
 

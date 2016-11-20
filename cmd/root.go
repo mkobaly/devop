@@ -31,14 +31,8 @@ var RootCmd = &cobra.Command{
 	Short: "Simplify builds and deployments",
 	Long: `A CLI that helps simplify the builds and deployments of micro services. 
 With many smaller components it can get tedious to build and deploy all
-of those moving parts. Hopefully this application can ease the pain
+of those moving parts. Hopefully this application can ease the pain.`,
 
-For example:
-
-devop build [buildId]
-devop deploy [projectId] --version --env
-devop verify [projectId]
-`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	//	Run: func(cmd *cobra.Command, args []string) { },

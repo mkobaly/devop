@@ -142,7 +142,7 @@ func (o *Octo) GetTaskResult(taskID string) (TaskResult, error) {
 	return result, err
 }
 
-//Deploy an project specific release to the given environment
+//Deploy a project specific release to the given environment
 func (o *Octo) Deploy(releaseID string, environmentID string) (TaskID, error) {
 	url := o.url + "/deployments/"
 

@@ -1,4 +1,4 @@
-// Copyright © 2016 NAME HERE <EMAIL ADDRESS>
+// Copyright © 2016 Michael Kobaly mkobaly@gmail.com
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,53 +19,78 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
+
+	"strings"
 
 	"github.com/fatih/color"
-	"github.com/mkobaly/devop/build"
 	"github.com/mkobaly/devop/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
+import tc "github.com/mkobaly/devop/teamcity"
+import teamcity "github.com/mkobaly/teamcity"
+
 // buildCmd represents the build command
 var buildCmd = &cobra.Command{
 	Use:   "build [buildId]",
-	Short: "Kick off the specified build on your Build Server",
-	Long: `This will start a build of a specific project on your build server. 
-For example:
-
-devop build my-project
-devop build my-project -b abc (use branch abc)`,
+	Short: "Kick off a Teamcity build",
+	Long:  "This will start a Teamcity build of one or more projects",
+	Example: strings.Join([]string{
+		"- devop build projectA                 Kick off build of projectA",
+		"- devop build projectA -b abc          Kick off build of projectA using branch abc",
+		"- devop build -f build.txt             Kick off build of all projects listed in build.txt",
+		"- devop build projectA -l results.log  Kick off build of projectA and log build results to a file",
+	}, "\n"),
 	RunE: func(cmd *cobra.Command, args []string) error {
 
 		config := config.NewConfig(viper.ConfigFileUsed())
-		tcb := build.TeamcityBuilder{Credentials: config.Teamcity}
+		tcb := tc.New(config.Teamcity)
+		//tcb := tc.Builder{Credentials: config.Teamcity}
 		logFile, _ := cmd.Flags().GetString("logFile")
 
 		if logFile != "" {
 			_ = os.Remove(logFile)
 		}
 
+		buildInfo := []tc.BuildInfo{}
+
 		if len(args) == 0 {
 			buildFile, _ := cmd.Flags().GetString("buildFile")
 			if buildFile == "" {
 				return errors.New("You must provide a buildId or set the buildFile flag")
 			}
-			builds, err := build.ParseBuildFile(buildFile)
+			builds, err := tc.ParseBuildFile(buildFile)
 			if err != nil {
 				return err
 			}
 			for _, b := range builds {
-				tcBuild(&tcb, b.BuildID, b.Branch, logFile)
+				buildInfo = append(buildInfo, b)
+				//tcBuild(&tcb, b.BuildID, b.Branch, logFile)
 			}
 
 		} else { //single build
 			branch, _ := cmd.Flags().GetString("branch")
 			buildID := args[0]
-			tcBuild(&tcb, buildID, branch, logFile)
+			buildInfo = append(buildInfo, tc.BuildInfo{BuildConfigID: buildID, Branch: branch})
+			//tcBuild(&tcb, buildID, branch, logFile)
+		}
+
+		buildChan := make(chan teamcity.Build)
+		for _, bi := range buildInfo {
+			tcb.SetBuildInfo(bi)
+			if err := tcb.Build(); err != nil {
+				return err
+			}
+			//tcBuild(&tcb, &bi, logFile)
+			go watchForFinishedBuild(tcb, buildChan)
+		}
+
+		for i := 0; i < len(buildInfo); i++ {
+			reportResult(<-buildChan)
 		}
 		return nil
-		//fmt.Println("build called")
 	},
 }
 
@@ -78,26 +103,49 @@ func init() {
 	//buildCmd.Flags().StringP("projectId", "p", "", "Project to build")
 }
 
-func tcBuild(b *build.TeamcityBuilder, buildID string, branch string, logFile string) error {
-	b.Branch = branch
-	if branch == "" {
-		b.Branch = ""
+func watchForFinishedBuild(b *tc.Builder, c chan teamcity.Build) error {
+	for {
+		time.Sleep(time.Second * 2)
+		err := b.VerifyBuildStatus()
+		if err != nil {
+			return err
+		}
+		fmt.Print(".")
+		if b.BuildResult.State == "finished" {
+			c <- *b.BuildResult
+			return nil
+		}
 	}
-	b.BuildID = buildID
-	if err := b.Build(); err != nil {
-		return err
-	}
-	branchName := branch
-	if branchName == "" {
-		branchName = "[Default]"
-	}
-	color.Green("Kicking off build for %s using branch %s\nUrl to build result:  %s\n",
-		b.BuildResult.BuildType.ProjectName, branchName, b.BuildResult.WebURL)
-	if logFile != "" {
-		writeToLog(logFile, b.GetBuildResult())
-	}
-	return nil
 }
+
+func reportResult(b teamcity.Build) {
+	if b.Status == "SUCCESS" {
+		color.Green("\n%s %s: %s ", b.BuildTypeID, b.State, b.Status)
+	} else {
+		color.Red("\n%s %s: %s", b.BuildTypeID, b.State, b.Status)
+	}
+}
+
+// func tcBuild(b *tc.Builder, bi *tc.BuildInfo, logFile string) error {
+// 	if bi.Branch == "" {
+// 		bi.Branch = ""
+// 	}
+// 	b.BuildInfo = bi
+
+// 	if err := b.Build(); err != nil {
+// 		return err
+// 	}
+// 	branchName := bi.Branch
+// 	if branchName == "" {
+// 		branchName = "[Default]"
+// 	}
+// 	color.Green("Kicking off build for %s using branch %s\n",
+// 		b.BuildResult.BuildType.ProjectName, branchName)
+// 	if logFile != "" {
+// 		writeToLog(logFile, b.BuildResultToJson())
+// 	}
+// 	return nil
+// }
 
 func writeToLog(path string, content string) {
 	fileHandle, _ := os.OpenFile(path, os.O_APPEND|os.O_CREATE, 0666)
@@ -106,26 +154,3 @@ func writeToLog(path string, content string) {
 	fmt.Fprintln(writer, content)
 	writer.Flush()
 }
-
-//Will parse a build file that lists out each buildID [branch] that needs to be built
-//buildID is required but branch is not. It will default to master. BuildID and branch name
-//need to be separated by a space
-// func parseBuildFile(path string) ([]buildInfo, error) {
-// 	file, err := os.Open(path)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer file.Close()
-
-// 	var builds []buildInfo
-// 	scanner := bufio.NewScanner(file)
-// 	for scanner.Scan() {
-// 		parts := strings.Split(scanner.Text(), " ")
-// 		branch := ""
-// 		if len(parts) > 1 {
-// 			branch = parts[1]
-// 		}
-// 		builds = append(builds, buildInfo{buildID: parts[0], branch: branch})
-// 	}
-// 	return builds, nil
-// }
